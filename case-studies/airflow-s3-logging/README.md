@@ -10,20 +10,17 @@ changes, only configuration.
 
 ## Status
 
-- ✅ **Verified**: the exact six-call S3 sequence below (`HeadBucket` →
-  `CreateBucket` → `PutObject` → `ListObjectsV2` → `GetObject` →
-  `DeleteObject`) round-trips correctly through a real `aws2azure` proxy
-  backed by Azurite. Verified twice: once via an ad-hoc reproduction of this
-  case study's exact config, and once by running the committed
-  `scripts/verify_s3_roundtrip.py` unmodified against a locally built
-  `aws2azure` + Azurite pair on the port/credentials this case study ships
-  with (`8080` / `AKIA-AIRFLOW-SHOWCASE`).
-- ⚠️ **Not yet run end-to-end**: the full `docker-compose.yml` in this
-  directory (real `apache/airflow` webserver + scheduler images, DAG trigger,
-  reading the log back through the Airflow UI) is provided but has not yet
-  been executed start-to-finish in this environment (no Docker available
-  here). If you run it and it works (or doesn't), please open an issue/PR
-  here with the result.
+- ✅ **CI-verified, continuously**: `.github/workflows/airflow-s3-logging.yml`
+  builds `aws2azure` from the upstream repo, starts it against Azurite, and
+  runs `scripts/verify_s3_roundtrip.py` (the exact six-call sequence below)
+  on every push/PR touching this case study —
+  [![smoke test](https://github.com/pedrosakuma/aws2azure-showcases/actions/workflows/airflow-s3-logging.yml/badge.svg)](https://github.com/pedrosakuma/aws2azure-showcases/actions/workflows/airflow-s3-logging.yml).
+- ⚠️ **Not yet run end-to-end**: the full Airflow webserver/scheduler stack
+  in `docker-compose.yml` (real `apache/airflow` images, DAG trigger, reading
+  the log back through the Airflow UI) is provided but not yet part of the
+  CI workflow or otherwise verified start-to-finish — only the underlying S3
+  call pattern is. If you run the full stack and it works (or doesn't),
+  please open an issue/PR here with the result.
 
 ## What's exercised
 

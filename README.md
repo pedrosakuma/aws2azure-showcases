@@ -31,7 +31,7 @@ application-level workflow round-trips correctly against an Azure backend.
 
 | Case study | Upstream project | AWS services exercised | Azure backend | Status |
 |---|---|---|---|---|
-| [`airflow-s3-logging`](case-studies/airflow-s3-logging/) | [Apache Airflow](https://airflow.apache.org/) | S3 (remote task logging) | Blob Storage (Azurite locally / real Storage account optionally) | ⚠️ call-pattern verified; full docker-compose stack not yet run end-to-end (see case study status) |
+| [`airflow-s3-logging`](case-studies/airflow-s3-logging/) | [Apache Airflow](https://airflow.apache.org/) | S3 (remote task logging) | Blob Storage (Azurite locally / real Storage account optionally) | ✅ CI-verified (call pattern); ⚠️ full Airflow UI stack not yet run end-to-end |
 
 ## Adding a new case study
 
