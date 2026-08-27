@@ -139,8 +139,7 @@ done.
 ## Known limits (by design, not a bug)
 
 - This case study only exercises S3. Airflow's AWS Secrets Manager
-  connections/variables backend (`SecretsManagerBackend`) is a natural
-  second case study (`aws2azure`'s `secretsmanager-basic-lifecycle` profile
-  is also GA) but isn't wired up here yet — contributions welcome.
+  connections/variables backend (`SecretsManagerBackend`) is covered by the
+  [`airflow-secrets-manager`](../airflow-secrets-manager/) case study.
 - `LocalExecutor` is used to keep the compose stack small; a
   `CeleryExecutor` + SQS broker variant is out of scope for this case study.

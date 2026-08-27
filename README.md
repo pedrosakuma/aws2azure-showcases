@@ -32,6 +32,7 @@ application-level workflow round-trips correctly against an Azure backend.
 | Case study | Upstream project | AWS services exercised | Azure backend | Status |
 |---|---|---|---|---|
 | [`airflow-s3-logging`](case-studies/airflow-s3-logging/) | [Apache Airflow](https://airflow.apache.org/) | S3 (remote task logging) | Blob Storage (Azurite locally / real Storage account optionally) | ✅ CI-verified (call pattern); ⚠️ full Airflow UI stack not yet run end-to-end |
+| [`airflow-secrets-manager`](case-studies/airflow-secrets-manager/) | [Apache Airflow](https://airflow.apache.org/) | Secrets Manager (`SecretsManagerBackend` connections/variables) | Key Vault (real vault only — no local emulator) | 📝 Config-only walkthrough; not yet run end-to-end (no local Key Vault emulator, no CI-provisioned Azure credentials) |
 
 ## Adding a new case study
 
