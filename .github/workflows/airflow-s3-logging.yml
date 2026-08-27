@@ -1,0 +1,63 @@
+name: airflow-s3-logging smoke test
+
+on:
+  push:
+    paths:
+      - "case-studies/airflow-s3-logging/**"
+      - ".github/workflows/airflow-s3-logging.yml"
+  pull_request:
+    paths:
+      - "case-studies/airflow-s3-logging/**"
+      - ".github/workflows/airflow-s3-logging.yml"
+  workflow_dispatch: {}
+
+jobs:
+  smoke-test:
+    # Runs the aws2azure + Azurite half of the stack (both build/start fine
+    # under Docker on Actions runners) and replays Airflow's exact S3 call
+    # pattern via scripts/verify_s3_roundtrip.py. This is CI-enforced,
+    # continuous evidence for the "call-pattern verified" claim in the case
+    # study README. It does NOT start the full Airflow webserver/scheduler
+    # stack (out of scope for a fast smoke test) -- see the README's "Status"
+    # section for what remains manual.
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: case-studies/airflow-s3-logging
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Start aws2azure + Azurite
+        run: docker compose up --build -d aws2azure azurite
+
+      - name: Wait for aws2azure health check
+        run: |
+          for i in $(seq 1 30); do
+            if docker compose ps aws2azure --format '{{.Health}}' | grep -q healthy; then
+              echo "aws2azure is healthy"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "aws2azure did not become healthy in time"
+          docker compose logs aws2azure
+          exit 1
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run S3 round-trip smoke test
+        run: |
+          python3 -m venv .venv
+          .venv/bin/pip install --quiet boto3
+          .venv/bin/python scripts/verify_s3_roundtrip.py
+
+      - name: Dump logs on failure
+        if: failure()
+        run: docker compose logs
+
+      - name: Tear down
+        if: always()
+        run: docker compose down -v

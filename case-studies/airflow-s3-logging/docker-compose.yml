@@ -1,0 +1,106 @@
+# Apache Airflow (LocalExecutor) + aws2azure + Azurite.
+#
+# Airflow writes/reads task logs to S3 through its S3TaskHandler. Its S3
+# connection is configured with `endpoint_url` pointing at the aws2azure
+# proxy, wired via an `s3.` network alias because aws2azure routes S3
+# requests by Host header (must start with "s3." or contain ".s3.") — the
+# same convention a real deployment satisfies via DNS/hosts pointing
+# s3.<region>.amazonaws.com at the sidecar, with zero Airflow code changes.
+#
+# aws2azure is built directly from the upstream repo (no published image
+# yet) via a remote git build context.
+
+x-airflow-common: &airflow-common
+  image: apache/airflow:2.10.4
+  environment: &airflow-common-env
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
+    AIRFLOW__CORE__LOAD_EXAMPLES: "true"
+    AIRFLOW__LOGGING__REMOTE_LOGGING: "True"
+    AIRFLOW__LOGGING__REMOTE_BASE_LOG_FOLDER: s3://airflow-logs
+    AIRFLOW__LOGGING__REMOTE_LOG_CONN_ID: aws_s3_showcase
+    # aws provider connection URI: aws://<key>:<secret>@/?endpoint_url=...&region_name=...
+    AIRFLOW_CONN_AWS_S3_SHOWCASE: >-
+      aws://AKIA-AIRFLOW-SHOWCASE:showcase-local-dev-secret-not-real@/?endpoint_url=http%3A%2F%2Fs3.aws2azure%3A8080&region_name=us-east-1
+  volumes:
+    - airflow-dags:/opt/airflow/dags
+    - airflow-logs:/opt/airflow/logs
+  depends_on:
+    postgres:
+      condition: service_healthy
+    aws2azure:
+      condition: service_healthy
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "airflow"]
+      interval: 5s
+      retries: 10
+
+  azurite:
+    image: mcr.microsoft.com/azure-storage/azurite:latest
+    command: azurite-blob --blobHost 0.0.0.0 --skipApiVersionCheck
+    ports:
+      - "10000:10000"
+
+  aws2azure:
+    build:
+      context: https://github.com/pedrosakuma/aws2azure.git
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      AWS2AZURE_CONFIG_FILE: /app/config.json
+      ASPNETCORE_URLS: http://+:8080
+    volumes:
+      - ./config/aws2azure-config.json:/app/config.json:ro
+    depends_on:
+      - azurite
+    networks:
+      default:
+        aliases:
+          - s3.aws2azure
+    healthcheck:
+      test: ["CMD", "/app/Aws2Azure.Proxy", "--health-check"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
+  airflow-init:
+    <<: *airflow-common
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - airflow db migrate && airflow users create --username admin --password admin --firstname a --lastname b --role Admin --email admin@example.com
+    depends_on:
+      postgres:
+        condition: service_healthy
+      aws2azure:
+        condition: service_healthy
+
+  airflow-webserver:
+    <<: *airflow-common
+    command: webserver
+    ports:
+      - "8081:8080"
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+
+  airflow-scheduler:
+    <<: *airflow-common
+    command: scheduler
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+
+volumes:
+  airflow-dags:
+  airflow-logs:

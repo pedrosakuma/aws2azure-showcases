@@ -1,0 +1,24 @@
+{
+  "services": { "s3": { "enabled": true } },
+  "bindings": [
+    {
+      "aws": {
+        "accessKeyId": "AKIA-AIRFLOW-SHOWCASE",
+        "secretAccessKey": "showcase-local-dev-secret-not-real"
+      },
+      "azure": {
+        "s3": {
+          "kind": "blob",
+          "target": {
+            "accountName": "devstoreaccount1",
+            "endpoint": "http://azurite:10000/devstoreaccount1"
+          },
+          "auth": {
+            "mode": "sharedKey",
+            "key": "Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw=="
+          }
+        }
+      }
+    }
+  ]
+}
