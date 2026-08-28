@@ -39,6 +39,16 @@ changes, only configuration.
   manual dispatch / labeled PR) than the fast smoke test above, since the
   full Postgres + webserver/scheduler footprint is heavier — see
   [Known limits](#known-limits-by-design-not-a-bug).
+- ✅ **App-level AWS-vs-Azure equivalence verified**: the
+  [`differential/`](differential/) subfolder runs an Airflow DAG built from
+  the same operator sequence as Airflow's own official S3 system test, once
+  against LocalStack S3 directly and once against aws2azure+Azurite, and
+  diffs the final state. Verified locally: both backends produce a
+  byte-identical result (bucket tagging, object content, listed keys) —
+  [![differential](https://github.com/pedrosakuma/aws2azure-showcases/actions/workflows/airflow-s3-logging-differential.yml/badge.svg)](https://github.com/pedrosakuma/aws2azure-showcases/actions/workflows/airflow-s3-logging-differential.yml).
+  This complements `aws2azure`'s own wire-protocol conformance suite
+  (which diffs LocalStack vs proxy-over-Azurite at the HTTP response level,
+  not the application level).
 
 ## What's exercised
 

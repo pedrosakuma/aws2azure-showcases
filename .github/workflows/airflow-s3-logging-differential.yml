@@ -1,0 +1,79 @@
+name: airflow-s3-logging differential (LocalStack vs aws2azure)
+
+# App-level AWS-vs-Azure differential (issue #10): runs the same Airflow DAG
+# once against LocalStack S3 directly and once against aws2azure+Azurite,
+# and fails if the final state (bucket tagging, object content, listed
+# keys) diverges between the two. Complements aws2azure's own wire-protocol
+# Tier-2 conformance suite (which diffs at the HTTP response level, not the
+# application level).
+#
+# Heavier than the per-push smoke test (two full Postgres+webserver+
+# scheduler stacks, run sequentially), so this runs on the same slower
+# cadence as the full-stack e2e workflow: nightly, manual dispatch, or a
+# labeled/relevant PR.
+
+on:
+  schedule:
+    - cron: "30 5 * * *" # nightly, 05:30 UTC (after the full-stack e2e run)
+  workflow_dispatch: {}
+  pull_request:
+    types: [labeled, synchronize, reopened]
+    paths:
+      - "case-studies/airflow-s3-logging/differential/**"
+      - ".github/workflows/airflow-s3-logging-differential.yml"
+
+jobs:
+  changes:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    outputs:
+      relevant: ${{ steps.filter.outputs.relevant }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            relevant:
+              - 'case-studies/airflow-s3-logging/differential/**'
+              - '.github/workflows/airflow-s3-logging-differential.yml'
+
+  differential:
+    needs: changes
+    if: >-
+      always() &&
+      (github.event_name == 'schedule' ||
+       github.event_name == 'workflow_dispatch' ||
+       (github.event_name == 'pull_request' &&
+        (needs.changes.outputs.relevant == 'true' ||
+         contains(github.event.pull_request.labels.*.name, 'run-integration'))))
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: case-studies/airflow-s3-logging/differential
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run LocalStack-vs-aws2azure differential
+        run: |
+          python3 -m venv .venv
+          .venv/bin/pip install --quiet requests
+          .venv/bin/python scripts/run_differential.py
+
+      - name: Dump logs on failure
+        if: failure()
+        run: |
+          docker compose -f docker-compose.localstack.yml logs || true
+          docker compose -f docker-compose.aws2azure.yml logs || true
+
+      - name: Tear down (safety net)
+        if: always()
+        run: |
+          docker compose -f docker-compose.localstack.yml down -v || true
+          docker compose -f docker-compose.aws2azure.yml down -v || true

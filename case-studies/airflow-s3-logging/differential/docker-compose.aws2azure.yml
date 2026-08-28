@@ -1,0 +1,57 @@
+# Backend B ("translated"): Airflow's S3 connection points at the aws2azure
+# proxy (backed by Azurite Blob Storage) -- the same setup the
+# `airflow-s3-logging` case study uses.
+include:
+  - docker-compose.base.yml
+
+services:
+  azurite:
+    image: mcr.microsoft.com/azure-storage/azurite:latest
+    command: azurite-blob --blobHost 0.0.0.0 --skipApiVersionCheck
+
+  aws2azure:
+    build:
+      context: https://github.com/pedrosakuma/aws2azure.git
+      dockerfile: Dockerfile
+    environment:
+      AWS2AZURE_CONFIG_FILE: /app/config.json
+      ASPNETCORE_URLS: http://+:8080
+    volumes:
+      - ./config/aws2azure-config.json:/app/config.json:ro
+    depends_on:
+      - azurite
+    networks:
+      default:
+        aliases:
+          - s3.aws2azure
+    healthcheck:
+      test: ["CMD", "/app/Aws2Azure.Proxy", "--health-check"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
+  airflow-init:
+    environment:
+      # aws provider connection URI: aws://<key>:<secret>@/?endpoint_url=...&region_name=...
+      AWS_TARGET_CONN_URI: >-
+        aws://AKIA-DIFFERENTIAL-TEST:differential-local-dev-secret-not-real@/?endpoint_url=http%3A%2F%2Fs3.aws2azure%3A8080&region_name=us-east-1
+    depends_on:
+      postgres:
+        condition: service_healthy
+      aws2azure:
+        condition: service_healthy
+
+  airflow-webserver:
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+      aws2azure:
+        condition: service_healthy
+
+  airflow-scheduler:
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+      aws2azure:
+        condition: service_healthy
