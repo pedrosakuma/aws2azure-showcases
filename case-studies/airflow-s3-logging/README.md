@@ -39,17 +39,34 @@ changes, only configuration.
 
 ## What's exercised
 
-Per task attempt, Airflow's `S3TaskHandler`/`S3Hook` issues this exact
-sequence against the configured S3 connection:
+**Airflow's own runtime call pattern** (`S3TaskHandler`/`S3RemoteLogIO`, from
+`apache-airflow-providers-amazon`) is narrower than it might look at first:
+per task attempt it only ever issues
 
-1. `HeadBucket` (does the log bucket exist?)
-2. `CreateBucket` (first-run bootstrap, if missing)
-3. `PutObject` — write the attempt's log (`dag_id=.../run_id=.../task_id=.../attempt=N.log`)
-4. `ListObjectsV2` — the webserver enumerating attempts for a task
-5. `GetObject` — the webserver rendering the log
-6. `DeleteObject` — retention/cleanup housekeeping
+1. `PutObject` — write the attempt's log (`dag_id=.../run_id=.../task_id=.../attempt=N.log`)
+2. `ListObjectsV2` — the webserver enumerating attempts for a task
+3. `GetObject` — the webserver rendering the log
+4. `DeleteObject` — retention/cleanup housekeeping
 
-All six operations are `implemented` in `aws2azure` and are part of its
+Airflow's real `S3TaskHandler` **never creates the bucket itself**, and
+`S3RemoteLogIO.write()` silently swallows the upload error if the bucket is
+missing — no error surfaces in the UI, logs just silently fall back to
+local-disk-only. `HeadBucket`/`CreateBucket` are **not** part of Airflow's
+runtime behavior; they only appear in two places in this case study, both of
+which are our own setup convenience, not Airflow's doing:
+
+- `docker-compose.yml`'s `airflow-init` bootstraps the bucket once via
+  `S3Hook` before the webserver/scheduler start (this is what actually
+  prevents the silent-failure bug above from being hit in this case study).
+- `scripts/verify_s3_roundtrip.py` additionally simulates a
+  `HeadBucket`→`CreateBucket` check as part of its own standalone,
+  Airflow-less smoke test.
+
+In any real deployment, provisioning the log bucket ahead of time is an
+operator/IaC responsibility — not something to rely on `S3TaskHandler` for.
+
+All operations above (plus `HeadBucket`/`CreateBucket` used by our own
+bootstrap/smoke-test code) are `implemented` in `aws2azure` and are part of its
 `s3-basic-object-crud` workload profile (GA as of the profile's last
 qualification — see the
 [upstream workload-GA page](https://github.com/pedrosakuma/aws2azure/blob/main/docs/site/workload-ga.md)
