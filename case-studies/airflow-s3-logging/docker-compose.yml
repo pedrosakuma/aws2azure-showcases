@@ -78,7 +78,25 @@ services:
     entrypoint: /bin/bash
     command:
       - -c
-      - airflow db migrate && airflow users create --username admin --password admin --firstname a --lastname b --role Admin --email admin@example.com
+      - |
+        airflow db migrate && \
+        airflow users create --username admin --password admin --firstname a --lastname b --role Admin --email admin@example.com && \
+        python3 -c "
+        from airflow.providers.amazon.aws.hooks.s3 import S3Hook
+        hook = S3Hook(aws_conn_id='aws_s3_showcase')
+        # S3TaskHandler never creates the log bucket itself (it only
+        # PutObject/GetObject-s into it) -- verified by running this stack
+        # end-to-end: without this bootstrap step, every log write fails
+        # silently (S3RemoteLogIO.write() swallows the error) and Airflow
+        # falls back to local-disk-only logs, with no error surfaced in the
+        # UI. This mirrors what a real deployment must also do once, e.g.
+        # via Terraform/Bicep provisioning the backing Blob container.
+        if not hook.check_for_bucket('airflow-logs'):
+            hook.create_bucket('airflow-logs')
+            print('created bucket airflow-logs')
+        else:
+            print('bucket airflow-logs already exists')
+        "
     depends_on:
       postgres:
         condition: service_healthy
