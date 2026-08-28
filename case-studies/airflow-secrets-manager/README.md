@@ -11,20 +11,28 @@ the [`airflow-s3-logging`](../airflow-s3-logging/) case study.
 
 ## Status
 
-- 📝 **Config-only walkthrough, not CI-verified**: unlike Blob Storage
-  (Azurite), there is no widely-used local emulator for Key Vault.
-  `aws2azure`'s own config schema (`$defs/secretsManagerBackend` in
-  `config.schema.json`) confirms this: the `secretsmanager` binding's
-  `target` only accepts an `https` `vaultUrl`, with no local/emulator
-  endpoint shape — so an automated, CI-enforced smoke test would need a
-  real (low-cost, disposable) Azure Key Vault instance and Entra
-  credentials, which this repo's CI does not currently provision. This case
-  study is therefore documented as a manual walkthrough against a real
-  vault; it has **not** been run end-to-end here (this environment had no
-  Azure subscription/credentials available). If you run it, please open an
-  issue/PR with the result — see [`airflow-s3-logging`](../airflow-s3-logging/)
-  for the "call-pattern verified vs. full stack verified" honesty
-  convention this case study follows.
+- ✅ **Manually verified against a real Azure Key Vault** (`airflow/connections/<id>`,
+  `airflow/variables/<name>`, and `airflow/config/<key>`-shaped secret IDs
+  all round-trip correctly through `aws2azure` → Key Vault, including
+  `CreateSecret`/`DescribeSecret`/`GetSecretValue`/`DeleteSecret`) — run via
+  `scripts/verify_secrets_roundtrip.py` against a disposable Resource
+  Group + Key Vault + Entra App Registration. This confirmed a real
+  upstream bug (Key Vault rejects secret names containing `/`, which is
+  Secrets Manager's own hierarchical-naming convention and exactly what
+  `connections_prefix`/`variables_prefix`/`config_prefix` produce),
+  fixed upstream in pedrosakuma/aws2azure#963/#964.
+- 📝 **Not CI-verified**: unlike Blob Storage (Azurite), there is no
+  widely-used local emulator for Key Vault. `aws2azure`'s own config
+  schema (`$defs/secretsManagerBackend` in `config.schema.json`) confirms
+  this: the `secretsmanager` binding's `target` only accepts an `https`
+  `vaultUrl`, with no local/emulator endpoint shape — so an automated,
+  CI-enforced run would need a real (low-cost, disposable) Azure Key
+  Vault instance and Entra credentials provisioned as CI secrets, which
+  this repo's CI does not currently do. This case study is therefore a
+  manual walkthrough against a real vault, not a nightly/dispatch CI job
+  like `airflow-s3-logging`'s — see that case study for the
+  "call-pattern verified vs. full stack verified vs. CI-verified"
+  honesty convention this one follows.
 
 ## What's exercised
 
