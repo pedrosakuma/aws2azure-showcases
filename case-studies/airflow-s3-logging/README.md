@@ -15,14 +15,16 @@ changes, only configuration.
   runs `scripts/verify_s3_roundtrip.py` (the exact six-call sequence below)
   on every push/PR touching this case study —
   [![smoke test](https://github.com/pedrosakuma/aws2azure-showcases/actions/workflows/airflow-s3-logging.yml/badge.svg)](https://github.com/pedrosakuma/aws2azure-showcases/actions/workflows/airflow-s3-logging.yml).
-- ✅ **Run end-to-end manually**: the full stack (`docker compose up
-  --build -d`, admin user creation, unpausing/triggering the bundled
-  `example_bash_operator` DAG) was run start-to-finish against a locally
-  built `aws2azure` image. All tasks reached `success`, and — with the
-  local copy of a task's log file deleted from disk — Airflow's own
-  `TaskLogReader` (the exact code path the webserver UI uses) still
-  returned the full log content, confirming it was read back from Azurite
-  Blob Storage through `aws2azure`, not from local disk.
+- ✅ **CI-verified end-to-end, nightly**:
+  `.github/workflows/airflow-s3-logging-e2e.yml` runs the *entire* stack
+  (Postgres + Airflow webserver/scheduler + aws2azure + Azurite), triggers
+  the bundled `example_bash_operator` DAG via the REST API, waits for
+  `success`, then deletes the task's local on-disk log copy and confirms
+  the webserver still serves the same content — proving it came from
+  Azurite via `aws2azure`, not local disk. Runs nightly, on manual dispatch,
+  or on a PR touching this case study —
+  [![full-stack e2e](https://github.com/pedrosakuma/aws2azure-showcases/actions/workflows/airflow-s3-logging-e2e.yml/badge.svg)](https://github.com/pedrosakuma/aws2azure-showcases/actions/workflows/airflow-s3-logging-e2e.yml).
+  (`scripts/verify_e2e_run.py` drives this and can also be run manually.)
 - 🛠️ **One real gap found and fixed by that run**: `S3TaskHandler` never
   creates the log bucket itself (it only issues `PutObject`/`GetObject`
   against it) and `S3RemoteLogIO.write()` swallows upload errors silently —
@@ -33,9 +35,10 @@ changes, only configuration.
   before the webserver/scheduler start, exactly like a real deployment
   must also provision the backing Blob container once (e.g. via
   Terraform/Bicep).
-- This end-to-end run is manual, not yet part of CI (the compose stack's
-  Postgres + full Airflow webserver/scheduler footprint is heavier than
-  the fast smoke test above) — see [Known limits](#known-limits-by-design-not-a-bug).
+- This end-to-end run is CI-enforced but on a slower cadence (nightly /
+  manual dispatch / labeled PR) than the fast smoke test above, since the
+  full Postgres + webserver/scheduler footprint is heavier — see
+  [Known limits](#known-limits-by-design-not-a-bug).
 
 ## What's exercised
 
