@@ -66,9 +66,11 @@ services:
       AWS2AZURE_CONFIG_FILE: /app/config.json
       ASPNETCORE_URLS: http://+:8080
     volumes:
-      # Edit config/aws2azure-config.json first: fill in your real Key
-      # Vault's vaultUrl and an Entra client-secret identity that has
-      # get/list/set permissions on it (see README "Prerequisites").
+      # config/aws2azure-config.json is git-ignored and rendered by
+      # scripts/render_config.sh from config/aws2azure-config.json.template
+      # + a local .env (copy .env.example -> .env and fill it in first --
+      # see README "Prerequisites"). This keeps the real client secret out
+      # of anything committed to the repo.
       - ./config/aws2azure-config.json:/app/config.json:ro
     networks:
       default:

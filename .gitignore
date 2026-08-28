@@ -4,3 +4,4 @@ __pycache__/
 azurite-data/
 *.log
 .env
+case-studies/airflow-secrets-manager/config/aws2azure-config.json
