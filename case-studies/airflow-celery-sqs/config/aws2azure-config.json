@@ -1,0 +1,30 @@
+{
+  "services": {
+    "sqs": {
+      "enabled": true
+    }
+  },
+  "bindings": [
+    {
+      "aws": {
+        "accessKeyId": "AKIA-AIRFLOW-CELERY-SHOWCASE",
+        "secretAccessKey": "showcase-local-dev-secret-not-real"
+      },
+      "azure": {
+        "sqs": {
+          "kind": "serviceBus",
+          "target": {
+            "namespace": "http://servicebus-emulator:5672/",
+            "managementEndpoint": "http://servicebus-emulator:5300/",
+            "transport": "Amqp"
+          },
+          "auth": {
+            "mode": "sas",
+            "keyName": "RootManageSharedAccessKey",
+            "key": "SAS_KEY_VALUE"
+          }
+        }
+      }
+    }
+  ]
+}

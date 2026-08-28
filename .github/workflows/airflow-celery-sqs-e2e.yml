@@ -1,0 +1,78 @@
+name: airflow-celery-sqs full-stack e2e
+
+# Runs the *entire* airflow-celery-sqs stack (Postgres + MSSQL + Service Bus
+# emulator + aws2azure + Airflow webserver/scheduler/worker with
+# CeleryExecutor), triggers a real DAG run, and proves the task was
+# dispatched and executed through kombu's SQS transport over aws2azure --
+# not just a raw-boto3 call-pattern replay.
+#
+# This is heavier (full webserver+scheduler+worker+Postgres+MSSQL boot, DAG
+# scheduling latency, Celery broker roundtrip) so it runs on a slower
+# cadence: nightly, manual dispatch, or an explicit `run-integration` label
+# on a PR that touches this case study -- mirroring the airflow-s3-logging
+# e2e workflow convention.
+
+on:
+  schedule:
+    - cron: "30 5 * * *" # nightly, 05:30 UTC
+  workflow_dispatch: {}
+  pull_request:
+    types: [labeled, synchronize, reopened]
+    paths:
+      - "case-studies/airflow-celery-sqs/**"
+      - ".github/workflows/airflow-celery-sqs-e2e.yml"
+
+jobs:
+  changes:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    outputs:
+      relevant: ${{ steps.filter.outputs.relevant }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            relevant:
+              - 'case-studies/airflow-celery-sqs/**'
+              - '.github/workflows/airflow-celery-sqs-e2e.yml'
+
+  e2e:
+    needs: changes
+    if: >-
+      always() &&
+      (github.event_name == 'schedule' ||
+       github.event_name == 'workflow_dispatch' ||
+       (github.event_name == 'pull_request' &&
+        (needs.changes.outputs.relevant == 'true' ||
+         contains(github.event.pull_request.labels.*.name, 'run-integration'))))
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: case-studies/airflow-celery-sqs
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Start the full stack
+        run: docker compose up --build -d
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run full end-to-end verification
+        run: |
+          python3 -m venv .venv
+          .venv/bin/pip install --quiet boto3 requests
+          .venv/bin/python scripts/verify_e2e_run.py
+
+      - name: Dump logs on failure
+        if: failure()
+        run: docker compose logs
+
+      - name: Tear down
+        if: always()
+        run: docker compose down -v
