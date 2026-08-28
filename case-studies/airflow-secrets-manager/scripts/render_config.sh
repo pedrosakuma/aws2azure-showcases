@@ -19,7 +19,11 @@ set -a
 source .env
 set +a
 
+# Strip any trailing \r (e.g. values captured from `az ... -o tsv`, which
+# emits CRLF on some platforms/versions) -- a stray \r embedded in a JSON
+# string value produces an "invalid control character" parse error.
 for var in AZURE_TENANT_ID AZURE_CLIENT_ID AZURE_CLIENT_SECRET AZURE_VAULT_URL; do
+  printf -v "$var" '%s' "${!var%$'\r'}"
   if [ -z "${!var:-}" ]; then
     echo "Missing required variable: $var (set it in .env)" >&2
     exit 1

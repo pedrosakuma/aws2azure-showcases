@@ -102,7 +102,19 @@ print(got)
 
 # 4. Cleanup.
 step("DeleteSecret (test cleanup)")
-client.delete_secret(SecretId=SECRET_ID, ForceDeleteWithoutRecovery=True)
+# ForceDeleteWithoutRecovery maps to a Key Vault *purge*, which many tenants
+# restrict via policy (Key Vault soft-delete is mandatory on modern vaults,
+# and purge is a separate, often-locked-down permission). The soft-delete
+# itself still succeeds even when the follow-up purge is denied, so on
+# AccessDeniedException the secret is already gone -- no need to retry the
+# delete, just confirm it's unresolvable (still enough to prove
+# SecretsManagerBackend's actual read path, which never deletes).
+try:
+    client.delete_secret(SecretId=SECRET_ID, ForceDeleteWithoutRecovery=True)
+except ClientError as exc:
+    if exc.response.get("Error", {}).get("Code") != "AccessDeniedException":
+        raise
+    print("purge (hard-delete) denied by Key Vault policy -- secret is still soft-deleted")
 try:
     client.describe_secret(SecretId=SECRET_ID)
     fail("expected secret to be gone after DeleteSecret")
