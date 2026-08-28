@@ -3,9 +3,9 @@
   "azureIdentities": {
     "showcase-key-vault-identity": {
       "authMode": "clientSecret",
-      "tenantId": "REPLACE-WITH-ENTRA-TENANT-ID",
-      "clientId": "REPLACE-WITH-ENTRA-CLIENT-ID",
-      "clientSecret": "REPLACE-WITH-ENTRA-CLIENT-SECRET"
+      "tenantId": "${AZURE_TENANT_ID}",
+      "clientId": "${AZURE_CLIENT_ID}",
+      "clientSecret": "${AZURE_CLIENT_SECRET}"
     }
   },
   "bindings": [
@@ -18,7 +18,7 @@
         "secretsmanager": {
           "kind": "keyVault",
           "target": {
-            "vaultUrl": "https://REPLACE-WITH-YOUR-VAULT.vault.azure.net/"
+            "vaultUrl": "${AZURE_VAULT_URL}"
           },
           "auth": {
             "mode": "reference",
