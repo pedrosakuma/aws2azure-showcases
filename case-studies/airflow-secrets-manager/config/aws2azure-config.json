@@ -1,0 +1,31 @@
+{
+  "services": { "secretsmanager": { "enabled": true } },
+  "azureIdentities": {
+    "showcase-key-vault-identity": {
+      "authMode": "clientSecret",
+      "tenantId": "REPLACE-WITH-ENTRA-TENANT-ID",
+      "clientId": "REPLACE-WITH-ENTRA-CLIENT-ID",
+      "clientSecret": "REPLACE-WITH-ENTRA-CLIENT-SECRET"
+    }
+  },
+  "bindings": [
+    {
+      "aws": {
+        "accessKeyId": "AKIA-AIRFLOW-SECRETS-SHOWCASE",
+        "secretAccessKey": "showcase-local-dev-secret-not-real"
+      },
+      "azure": {
+        "secretsmanager": {
+          "kind": "keyVault",
+          "target": {
+            "vaultUrl": "https://REPLACE-WITH-YOUR-VAULT.vault.azure.net/"
+          },
+          "auth": {
+            "mode": "reference",
+            "identity": "showcase-key-vault-identity"
+          }
+        }
+      }
+    }
+  ]
+}

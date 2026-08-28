@@ -1,0 +1,114 @@
+# Apache Airflow (LocalExecutor) + aws2azure + a REAL Azure Key Vault.
+#
+# Unlike the airflow-s3-logging case study, there is no widely-used local
+# emulator for Key Vault (Azurite only emulates Storage), so this stack
+# targets a real (low-cost, disposable) vault -- see the README's
+# "Prerequisites" section. aws2azure's own config schema backs this up: the
+# secretsmanager binding's `target` only accepts an https `vaultUrl`, no
+# local/emulator endpoint shape.
+#
+# Airflow's SecretsManagerBackend is configured entirely via
+# AIRFLOW__SECRETS__BACKEND_KWARGS, pointing its boto3 client at the
+# aws2azure proxy through an `endpoint_url` override -- no Airflow code
+# changes. The `secretsmanager.` network alias is required because aws2azure
+# routes Secrets Manager requests by Host header (must start with
+# "secretsmanager." / "secretsmanager-", or equal "secretsmanager"), the
+# same convention a real deployment satisfies via DNS/hosts pointing
+# secretsmanager.<region>.amazonaws.com at the sidecar.
+#
+# aws2azure is built directly from the upstream repo (no published image
+# yet) via a remote git build context.
+
+x-airflow-common: &airflow-common
+  image: apache/airflow:2.10.4
+  environment: &airflow-common-env
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
+    AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    AIRFLOW__SECRETS__BACKEND: airflow.providers.amazon.aws.secrets.secrets_manager.SecretsManagerBackend
+    # backend_kwargs is plain JSON read by SecretsManagerBackend.__init__;
+    # the AWS-shaped keys (endpoint_url/region_name/aws_access_key_id/
+    # aws_secret_access_key) are forwarded to boto3 via AwsConnectionWrapper,
+    # same as any other AWS hook "extra" field.
+    AIRFLOW__SECRETS__BACKEND_KWARGS: >-
+      {"connections_prefix": "airflow/connections", "variables_prefix": "airflow/variables",
+       "config_prefix": null, "endpoint_url": "http://secretsmanager.aws2azure:8080",
+       "region_name": "us-east-1", "aws_access_key_id": "AKIA-AIRFLOW-SECRETS-SHOWCASE",
+       "aws_secret_access_key": "showcase-local-dev-secret-not-real"}
+  volumes:
+    - airflow-dags:/opt/airflow/dags
+    - airflow-logs:/opt/airflow/logs
+  depends_on:
+    postgres:
+      condition: service_healthy
+    aws2azure:
+      condition: service_healthy
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "airflow"]
+      interval: 5s
+      retries: 10
+
+  aws2azure:
+    build:
+      context: https://github.com/pedrosakuma/aws2azure.git
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      AWS2AZURE_CONFIG_FILE: /app/config.json
+      ASPNETCORE_URLS: http://+:8080
+    volumes:
+      # Edit config/aws2azure-config.json first: fill in your real Key
+      # Vault's vaultUrl and an Entra client-secret identity that has
+      # get/list/set permissions on it (see README "Prerequisites").
+      - ./config/aws2azure-config.json:/app/config.json:ro
+    networks:
+      default:
+        aliases:
+          - secretsmanager.aws2azure
+    healthcheck:
+      test: ["CMD", "/app/Aws2Azure.Proxy", "--health-check"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
+  airflow-init:
+    <<: *airflow-common
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - airflow db migrate && airflow users create --username admin --password admin --firstname a --lastname b --role Admin --email admin@example.com
+    depends_on:
+      postgres:
+        condition: service_healthy
+      aws2azure:
+        condition: service_healthy
+
+  airflow-webserver:
+    <<: *airflow-common
+    command: webserver
+    ports:
+      - "8081:8080"
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+
+  airflow-scheduler:
+    <<: *airflow-common
+    command: scheduler
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+
+volumes:
+  airflow-dags:
+  airflow-logs:
