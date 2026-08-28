@@ -15,12 +15,27 @@ changes, only configuration.
   runs `scripts/verify_s3_roundtrip.py` (the exact six-call sequence below)
   on every push/PR touching this case study —
   [![smoke test](https://github.com/pedrosakuma/aws2azure-showcases/actions/workflows/airflow-s3-logging.yml/badge.svg)](https://github.com/pedrosakuma/aws2azure-showcases/actions/workflows/airflow-s3-logging.yml).
-- ⚠️ **Not yet run end-to-end**: the full Airflow webserver/scheduler stack
-  in `docker-compose.yml` (real `apache/airflow` images, DAG trigger, reading
-  the log back through the Airflow UI) is provided but not yet part of the
-  CI workflow or otherwise verified start-to-finish — only the underlying S3
-  call pattern is. If you run the full stack and it works (or doesn't),
-  please open an issue/PR here with the result.
+- ✅ **Run end-to-end manually**: the full stack (`docker compose up
+  --build -d`, admin user creation, unpausing/triggering the bundled
+  `example_bash_operator` DAG) was run start-to-finish against a locally
+  built `aws2azure` image. All tasks reached `success`, and — with the
+  local copy of a task's log file deleted from disk — Airflow's own
+  `TaskLogReader` (the exact code path the webserver UI uses) still
+  returned the full log content, confirming it was read back from Azurite
+  Blob Storage through `aws2azure`, not from local disk.
+- 🛠️ **One real gap found and fixed by that run**: `S3TaskHandler` never
+  creates the log bucket itself (it only issues `PutObject`/`GetObject`
+  against it) and `S3RemoteLogIO.write()` swallows upload errors silently —
+  so without the log bucket pre-existing, every task log write failed
+  silently and Airflow fell back to local-disk-only logs, with **no error
+  surfaced anywhere in the UI or logs**. `docker-compose.yml`'s
+  `airflow-init` now bootstraps the `airflow-logs` bucket (via `S3Hook`)
+  before the webserver/scheduler start, exactly like a real deployment
+  must also provision the backing Blob container once (e.g. via
+  Terraform/Bicep).
+- This end-to-end run is manual, not yet part of CI (the compose stack's
+  Postgres + full Airflow webserver/scheduler footprint is heavier than
+  the fast smoke test above) — see [Known limits](#known-limits-by-design-not-a-bug).
 
 ## What's exercised
 
@@ -60,14 +75,11 @@ cd case-studies/airflow-s3-logging
 docker compose up --build -d
 ```
 
-Wait for the webserver health check, then create the admin user and trigger
-the bundled example DAG:
+Wait for the webserver health check (the `airflow-init` service creates the
+admin user and bootstraps the `airflow-logs` bucket automatically), then
+unpause and trigger the bundled example DAG:
 
 ```bash
-docker compose exec airflow-webserver airflow users create \
-  --username admin --password admin --firstname a --lastname b \
-  --role Admin --email admin@example.com
-
 docker compose exec airflow-webserver airflow dags unpause example_bash_operator
 docker compose exec airflow-webserver airflow dags trigger example_bash_operator
 ```
