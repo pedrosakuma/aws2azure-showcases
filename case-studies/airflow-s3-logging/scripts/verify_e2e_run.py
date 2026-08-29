@@ -13,7 +13,11 @@ Steps:
      code path -- TaskLogReader -- the webserver UI itself uses).
   5. Fetch the same log object directly from Azurite via aws2azure
      (boto3 GetObject) and assert its content matches what the REST API
-     served, proving the object actually exists in Azurite.
+     served, proving the object actually exists in Azurite. The remote
+     upload happens from the task's own process teardown, decoupled
+     from -- and sometimes lagging -- the scheduler's "success" state
+     transition, so this comparison is retried with a bounded backoff
+     rather than asserted on the first read.
   6. Delete the task's *local* on-disk log copy (inside the scheduler
      container) and re-fetch via the REST API -- if the content still
      matches, the webserver read it from Azurite, not local disk.
@@ -120,6 +124,31 @@ def delete_local_log_copy(run_id, try_number=1):
     print(f"deleted local log copy: {path}")
 
 
+def wait_for_azurite_log_containment(run_id, api_log_fn, failure_hint, timeout=60, interval=5):
+    """Poll until the object stored in Azurite is contained in the log
+    served by the REST API, or raise the given assertion after timeout.
+
+    Airflow's S3TaskHandler uploads the task log to remote storage from
+    the task's own process teardown, which is decoupled from -- and can
+    lag slightly behind -- the scheduler marking the task instance
+    "success". Reading immediately after that state transition can
+    legitimately race the upload; retrying tolerates that eventual
+    consistency instead of treating a transient timing gap as a wiring
+    bug.
+    """
+    deadline = time.time() + timeout
+    last_api_log = ""
+    last_azurite_log = ""
+    while True:
+        last_api_log = api_log_fn()
+        _, last_azurite_log = fetch_log_via_azurite(run_id)
+        if last_azurite_log in last_api_log:
+            return last_api_log
+        if time.time() >= deadline:
+            assert last_azurite_log in last_api_log, failure_hint
+        time.sleep(interval)
+
+
 def main():
     wait_for_webserver()
     run_id = trigger_dag_run()
@@ -127,22 +156,22 @@ def main():
     if state != "success":
         sys.exit(f"dag run did not succeed (state={state})")
 
-    api_log = fetch_log_via_api(run_id)
-    assert api_log.strip(), "task log via REST API was empty"
-
-    _, azurite_log = fetch_log_via_azurite(run_id)
-    assert azurite_log in api_log, (
+    api_log = wait_for_azurite_log_containment(
+        run_id,
+        lambda: fetch_log_via_api(run_id),
         "log content served by the webserver does not contain the object "
-        "stored in Azurite -- remote logging may not be wired correctly"
+        "stored in Azurite -- remote logging may not be wired correctly",
     )
+    assert api_log.strip(), "task log via REST API was empty"
     print("REST API log content matches the object stored in Azurite")
 
     delete_local_log_copy(run_id)
-    api_log_after_delete = fetch_log_via_api(run_id)
-    assert azurite_log in api_log_after_delete, (
+    wait_for_azurite_log_containment(
+        run_id,
+        lambda: fetch_log_via_api(run_id),
         "after deleting the local log copy, the webserver no longer served "
         "the same content -- it may have been reading from local disk, not "
-        "from Azurite via aws2azure"
+        "from Azurite via aws2azure",
     )
     print(
         "PASS: task log was served from Azurite via aws2azure after the "
