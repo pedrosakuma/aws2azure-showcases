@@ -103,6 +103,33 @@ def wait_for_dag_run(run_id, timeout=300):
     sys.exit(f"dag run {run_id} did not finish within {timeout}s")
 
 
+def dump_task_logs(run_id):
+    """Prints every task instance's log for this DAG run -- `docker compose
+    logs` doesn't capture task logs (LocalExecutor writes them to files
+    inside the container, not to the scheduler's stdout), so this is the
+    only way to see *why* a task failed from outside the container.
+    """
+    try:
+        task_instances = api("GET", f"/dags/{DAG_ID}/dagRuns/{run_id}/taskInstances")["task_instances"]
+    except requests.RequestException as exc:
+        print(f"could not list task instances for {run_id}: {exc}")
+        return
+    for ti in task_instances:
+        task_id = ti["task_id"]
+        print(f"--- log for task {task_id} (state={ti['state']}) ---")
+        try:
+            r = requests.get(
+                f"{WEBSERVER}/api/v1/dags/{DAG_ID}/dagRuns/{run_id}/taskInstances/{task_id}/logs/1",
+                auth=AUTH,
+                params={"full_content": "true"},
+                headers={"Accept": "text/plain"},
+                timeout=15,
+            )
+            print(r.text)
+        except requests.RequestException as exc:
+            print(f"could not fetch log for task {task_id}: {exc}")
+
+
 def wait_for_servicebus_emulator(timeout=120):
     """Waits for the emulator's AMQP port to accept TCP connections. A
     plain socket probe (rather than an SDK-level operation) avoids the
@@ -149,6 +176,7 @@ def main():
     run_id = trigger_dag_run()
     state = wait_for_dag_run(run_id)
     if state != "success":
+        dump_task_logs(run_id)
         sys.exit(f"dag run did not succeed (state={state})")
 
     message = receive_published_message(subscription_id)
