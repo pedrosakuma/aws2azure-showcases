@@ -1,0 +1,60 @@
+# dynein (awslabs/dynein, a real DynamoDB CLI client) + aws2azure + a local
+# Azure Cosmos DB emulator.
+#
+# dynein talks to DynamoDB using the standard Rust AWS SDK, which honors the
+# AWS_ENDPOINT_URL environment variable out of the box -- no dynein code
+# changes, no custom build, just an env var pointed at the proxy. aws2azure
+# routes DynamoDB requests by Host header (must start with "dynamodb." or
+# "dynamodb-", or equal "dynamodb" exactly), so dynein is pointed at a
+# `dynamodb.aws2azure` network alias, mirroring the `s3.aws2azure` /
+# `sqs.aws2azure` alias convention from the other case studies.
+#
+# aws2azure is built directly from the upstream repo (no published image
+# yet) via a remote git build context.
+#
+# The Cosmos DB emulator must be pinned to the `vnext-preview` tag (plain
+# HTTP on 8081, Postgres+pgcosmos-backed) -- the `:latest` tag is
+# HTTPS-only and does not match aws2azure's plain-HTTP `cosmos` target.
+# This was a real upstream bug in aws2azure's own shipped docker-compose.yml
+# (see README.md, aws2azure#967/#968).
+
+services:
+  cosmos:
+    image: mcr.microsoft.com/cosmosdb/linux/azure-cosmos-emulator:vnext-preview
+    mem_limit: 3g
+    environment:
+      AZURE_COSMOS_EMULATOR_PARTITION_COUNT: "3"
+      AZURE_COSMOS_EMULATOR_ENABLE_DATA_PERSISTENCE: "false"
+    ports:
+      - "8081:8081"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8081/ >/dev/null || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 40
+      start_period: 10s
+
+  aws2azure:
+    build:
+      context: https://github.com/pedrosakuma/aws2azure.git
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      AWS2AZURE_CONFIG_FILE: /app/config.json
+      ASPNETCORE_URLS: http://+:8080
+    volumes:
+      - ./config/aws2azure-config.json:/app/config.json:ro
+    depends_on:
+      cosmos:
+        condition: service_healthy
+    networks:
+      default:
+        aliases:
+          - dynamodb.aws2azure
+    healthcheck:
+      test: ["CMD", "/app/Aws2Azure.Proxy", "--health-check"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
