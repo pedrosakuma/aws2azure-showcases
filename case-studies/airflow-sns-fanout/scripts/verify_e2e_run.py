@@ -24,6 +24,7 @@ and the Service Bus emulator's AMQP/management ports reachable at
 localhost:5672/5300.
 """
 import hashlib
+import json
 import sys
 import time
 
@@ -43,6 +44,17 @@ MESSAGE_BODY = (
     "aws2azure to Azure Service Bus Topics."
 )
 MESSAGE_SUBJECT = "aws2azure SNS showcase"
+
+# Airflow's SnsHook._build_publish_kwargs *always* sends MessageStructure="json"
+# with Message=json.dumps({"default": message}) -- there is no SnsPublishOperator
+# parameter to opt out of this. aws2azure's Publish handler documents (see
+# docs/gaps/sns/Publish.yaml behavior_differences: "MessageStructure=json is
+# passed through as-is; the proxy does not filter per-protocol payloads yet")
+# that it does not parse/filter this envelope, so the raw JSON string -- not
+# the unwrapped MESSAGE_BODY -- is exactly what ends up on the Service Bus
+# topic subscription. This showcase exercises that documented gap in
+# practice via a real, unmodified Airflow operator.
+EXPECTED_BODY = json.dumps({"default": MESSAGE_BODY})
 
 SERVICE_BUS_CONNECTION_STRING = (
     "Endpoint=sb://localhost:5672;"
@@ -183,9 +195,11 @@ def main():
 
     message = receive_published_message(subscription_id)
     body = str(message)
-    assert body == MESSAGE_BODY, (
+    assert body == EXPECTED_BODY, (
         f"message body read from the Service Bus topic subscription does not match "
-        f"what SnsPublishOperator sent: got {body!r}"
+        f"the JSON-wrapped envelope SnsPublishOperator always sends "
+        f"(MessageStructure=json is passed through as-is by aws2azure -- see "
+        f"docs/gaps/sns/Publish.yaml): got {body!r}"
     )
 
     def _prop(props, key):

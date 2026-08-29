@@ -47,6 +47,19 @@ Concretely, this means:
   client, but does **not** validate — and cannot validate — any SNS→SQS
   fanout delivery, because aws2azure does not implement that.
 
+This case study also surfaces a second documented, pre-existing gap in
+practice: Airflow's `SnsPublishOperator` always calls the SNS API with
+`MessageStructure="json"` and `Message=json.dumps({"default": <your
+message>})` — there is no operator parameter to opt out of this wrapping
+(see `airflow.providers.amazon.aws.hooks.sns._build_publish_kwargs`).
+aws2azure's `Publish` handler passes `MessageStructure=json` payloads
+through as-is without parsing/filtering them per protocol
+(`docs/gaps/sns/Publish.yaml` behavior_differences), so the message body
+landing on the Service Bus topic subscription is the raw JSON-wrapped
+string, not the unwrapped text. `scripts/verify_e2e_run.py` asserts this
+exact documented shape (`EXPECTED_BODY`) rather than the unwrapped text —
+this is expected, current aws2azure behavior, not a test bug.
+
 ## Stack
 
 - `postgres` — Airflow metadata DB.
