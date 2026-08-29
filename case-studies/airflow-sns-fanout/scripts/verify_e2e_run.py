@@ -153,7 +153,9 @@ def wait_for_servicebus_emulator(timeout=120):
 
 def receive_published_message(subscription_id: str, timeout=60):
     with ServiceBusClient.from_connection_string(SERVICE_BUS_CONNECTION_STRING) as client:
-        with client.create_receiver(TOPIC_NAME, subscription_id, max_wait_time=timeout) as receiver:
+        with client.get_subscription_receiver(
+            topic_name=TOPIC_NAME, subscription_name=subscription_id, max_wait_time=timeout
+        ) as receiver:
             messages = receiver.receive_messages(max_message_count=1, max_wait_time=timeout)
             if not messages:
                 sys.exit(
