@@ -1,0 +1,28 @@
+{
+  "services": {
+    "dynamodb": {
+      "enabled": true
+    }
+  },
+  "bindings": [
+    {
+      "aws": {
+        "accessKeyId": "AKIA-DYNEIN-DYNAMODB-SHOWCASE",
+        "secretAccessKey": "showcase-local-dev-secret-not-real"
+      },
+      "azure": {
+        "dynamodb": {
+          "kind": "cosmos",
+          "target": {
+            "endpoint": "http://cosmos:8081/",
+            "databaseName": "aws2azure"
+          },
+          "auth": {
+            "mode": "sharedKey",
+            "key": "C2y6yDjf5/R+ob0N8A7Cgv30VRDJIWEHLM+4QDU5DE2nQ9nDuVTqobD4b8mGGyPMbIZnqyMsEcaGQy67XIw/Jw=="
+          }
+        }
+      }
+    }
+  ]
+}

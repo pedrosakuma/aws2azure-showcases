@@ -1,0 +1,75 @@
+name: dynein-dynamodb full-stack e2e
+
+# Runs the dynein-dynamodb stack (Cosmos DB emulator + aws2azure), bootstraps
+# the Cosmos database, and drives a real dynein (awslabs/dynein) CLI binary
+# through a full DynamoDB table lifecycle -- CreateTable, PutItem, GetItem,
+# Query, Scan, DeleteItem, DeleteTable -- proving aws2azure's DynamoDB module
+# works against an unmodified, real-world DynamoDB client.
+
+on:
+  schedule:
+    - cron: "45 5 * * *" # nightly, 05:45 UTC
+  workflow_dispatch: {}
+  pull_request:
+    types: [labeled, synchronize, reopened]
+    paths:
+      - "case-studies/dynein-dynamodb/**"
+      - ".github/workflows/dynein-dynamodb-e2e.yml"
+
+jobs:
+  changes:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    outputs:
+      relevant: ${{ steps.filter.outputs.relevant }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            relevant:
+              - 'case-studies/dynein-dynamodb/**'
+              - '.github/workflows/dynein-dynamodb-e2e.yml'
+
+  e2e:
+    needs: changes
+    if: >-
+      always() &&
+      (github.event_name == 'schedule' ||
+       github.event_name == 'workflow_dispatch' ||
+       (github.event_name == 'pull_request' &&
+        (needs.changes.outputs.relevant == 'true' ||
+         contains(github.event.pull_request.labels.*.name, 'run-integration'))))
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: case-studies/dynein-dynamodb
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Start the stack
+        run: docker compose up --build -d
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Bootstrap the Cosmos database
+        run: |
+          python3 -m venv .venv
+          .venv/bin/pip install --quiet azure-cosmos
+          .venv/bin/python scripts/bootstrap_cosmos_db.py
+
+      - name: Run full end-to-end verification
+        run: .venv/bin/python scripts/verify_e2e_run.py
+
+      - name: Dump logs on failure
+        if: failure()
+        run: docker compose logs
+
+      - name: Tear down
+        if: always()
+        run: docker compose down -v
