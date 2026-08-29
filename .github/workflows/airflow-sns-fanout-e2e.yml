@@ -1,0 +1,84 @@
+name: airflow-sns-fanout full-stack e2e
+
+# Runs the *entire* airflow-sns-fanout stack (Postgres + MSSQL + Service Bus
+# emulator + aws2azure + Airflow webserver/scheduler), triggers a real DAG
+# run using Airflow's unmodified SnsPublishOperator, and proves the
+# published message reached the backing Azure Service Bus topic
+# subscription -- not just a raw-boto3 call-pattern replay.
+#
+# See README.md "What this does NOT prove": aws2azure's SNS Subscribe does
+# not forward/deliver messages to a subscribed SQS queue or HTTP(S)
+# endpoint (documented non-goal); verification reads the published message
+# back directly from the Service Bus topic subscription via the native
+# azure-servicebus SDK.
+#
+# This is heavier (full webserver+scheduler+Postgres+MSSQL boot, DAG
+# scheduling latency) so it runs on a slower cadence: nightly, manual
+# dispatch, or an explicit `run-integration` label on a PR that touches
+# this case study -- mirroring the airflow-s3-logging/airflow-celery-sqs
+# e2e workflow convention.
+
+on:
+  schedule:
+    - cron: "0 6 * * *" # nightly, 06:00 UTC
+  workflow_dispatch: {}
+  pull_request:
+    types: [labeled, synchronize, reopened]
+    paths:
+      - "case-studies/airflow-sns-fanout/**"
+      - ".github/workflows/airflow-sns-fanout-e2e.yml"
+
+jobs:
+  changes:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    outputs:
+      relevant: ${{ steps.filter.outputs.relevant }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            relevant:
+              - 'case-studies/airflow-sns-fanout/**'
+              - '.github/workflows/airflow-sns-fanout-e2e.yml'
+
+  e2e:
+    needs: changes
+    if: >-
+      always() &&
+      (github.event_name == 'schedule' ||
+       github.event_name == 'workflow_dispatch' ||
+       (github.event_name == 'pull_request' &&
+        (needs.changes.outputs.relevant == 'true' ||
+         contains(github.event.pull_request.labels.*.name, 'run-integration'))))
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: case-studies/airflow-sns-fanout
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Start the full stack
+        run: docker compose up --build -d
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run full end-to-end verification
+        run: |
+          python3 -m venv .venv
+          .venv/bin/pip install --quiet "azure-servicebus>=7.14.0" requests
+          .venv/bin/python scripts/verify_e2e_run.py
+
+      - name: Dump logs on failure
+        if: failure()
+        run: docker compose logs
+
+      - name: Tear down
+        if: always()
+        run: docker compose down -v

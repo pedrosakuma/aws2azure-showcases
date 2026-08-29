@@ -1,0 +1,28 @@
+{
+  "services": {
+    "sns": { "enabled": true, "defaultBackend": "ServiceBusTopics" }
+  },
+  "bindings": [
+    {
+      "aws": {
+        "accessKeyId": "AKIA-AIRFLOW-SNS-SHOWCASE",
+        "secretAccessKey": "showcase-local-dev-secret-not-real"
+      },
+      "azure": {
+        "sns": {
+          "kind": "serviceBusTopics",
+          "target": {
+            "namespace": "sbemulatorns",
+            "endpoint": "http://servicebus-emulator:5672/",
+            "managementEndpoint": "http://servicebus-emulator:5300/"
+          },
+          "auth": {
+            "mode": "sas",
+            "keyName": "RootManageSharedAccessKey",
+            "key": "SAS_KEY_VALUE"
+          }
+        }
+      }
+    }
+  ]
+}
