@@ -1,0 +1,133 @@
+# Apache Airflow (LocalExecutor) + aws2azure + local Service Bus emulator,
+# publishing to SNS via Airflow's unmodified SnsPublishOperator.
+#
+# aws2azure routes SNS requests by Host header (must start with "sns.") --
+# the same convention a real deployment satisfies via DNS/hosts pointing
+# sns.<region>.amazonaws.com at the sidecar, with zero Airflow code changes.
+# SNS is backed here by Azure Service Bus Topics via the local Service Bus
+# emulator (the same emulator image the airflow-celery-sqs case study uses
+# for SQS queues).
+#
+# IMPORTANT (see README.md "What this does NOT prove"): aws2azure's SNS
+# Subscribe only records subscription metadata as an Azure Service Bus
+# topic subscription -- it does not implement active fan-out delivery to an
+# SQS queue or an HTTP(S) endpoint (documented non-goal, see
+# docs/gaps/sns/Subscribe.yaml in the aws2azure repo). Verification therefore
+# reads the published message directly from the backing Service Bus topic
+# subscription using the native azure-servicebus Python SDK, bypassing
+# aws2azure on the read side -- exactly the pattern that gap doc recommends.
+#
+# aws2azure is built directly from the upstream repo (no published image
+# yet) via a remote git build context.
+
+x-airflow-common: &airflow-common
+  image: apache/airflow:2.10.4
+  environment: &airflow-common-env
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: "postgresql+psycopg2://airflow:airflow@postgres/airflow"
+    AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    AIRFLOW__API__AUTH_BACKENDS: "airflow.api.auth.backend.basic_auth"
+    # aws provider connection URI: aws://<key>:<secret>@/?endpoint_url=...&region_name=...
+    AIRFLOW_CONN_AWS_SNS_SHOWCASE: >-
+      aws://AKIA-AIRFLOW-SNS-SHOWCASE:showcase-local-dev-secret-not-real@/?endpoint_url=http%3A%2F%2Fsns.aws2azure%3A8080&region_name=us-east-1
+  volumes:
+    - ./dags:/opt/airflow/dags
+    - airflow-logs:/opt/airflow/logs
+  depends_on:
+    postgres:
+      condition: service_healthy
+    aws2azure:
+      condition: service_healthy
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "airflow"]
+      interval: 5s
+      retries: 10
+
+  mssql:
+    image: mcr.microsoft.com/azure-sql-edge:latest
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: "Aws2AzureLocalDev!"
+
+  servicebus-emulator:
+    build:
+      context: ./deploy/servicebus
+    depends_on:
+      - mssql
+    environment:
+      ACCEPT_EULA: "Y"
+      SQL_SERVER: mssql
+      MSSQL_SA_PASSWORD: "Aws2AzureLocalDev!"
+    ports:
+      # Exposed to the host so scripts/verify_e2e_run.py can read the
+      # published message directly from the backing Service Bus topic
+      # subscription via the native azure-servicebus Python SDK (AMQP) --
+      # aws2azure's SNS Subscribe does not forward/deliver messages itself
+      # (see docker-compose.yml header comment and README.md).
+      - "5672:5672"
+      - "5300:5300"
+
+  aws2azure:
+    build:
+      context: https://github.com/pedrosakuma/aws2azure.git
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      AWS2AZURE_CONFIG_FILE: /app/config.json
+      ASPNETCORE_URLS: http://+:8080
+    volumes:
+      - ./config/aws2azure-config.json:/app/config.json:ro
+    depends_on:
+      - servicebus-emulator
+    networks:
+      default:
+        aliases:
+          - sns.aws2azure
+    healthcheck:
+      test: ["CMD", "/app/Aws2Azure.Proxy", "--health-check"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
+  airflow-init:
+    <<: *airflow-common
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - |
+        airflow db migrate && \
+        airflow users create --username admin --password admin --firstname a --lastname b --role Admin --email admin@example.com
+    depends_on:
+      postgres:
+        condition: service_healthy
+      aws2azure:
+        condition: service_healthy
+
+  airflow-webserver:
+    <<: *airflow-common
+    command: webserver
+    ports:
+      - "8081:8080"
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+
+  airflow-scheduler:
+    <<: *airflow-common
+    command: scheduler
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+
+volumes:
+  airflow-logs:
