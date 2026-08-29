@@ -63,7 +63,7 @@ with DAG(
         target_arn=TOPIC_ARN,
         message=MESSAGE_BODY,
         subject=MESSAGE_SUBJECT,
-        message_attributes={"showcase": {"DataType": "String", "StringValue": "airflow-sns-fanout"}},
+        message_attributes={"showcase": "airflow-sns-fanout"},
     )
 
     bootstrap_topic_and_subscription >> publish_message
