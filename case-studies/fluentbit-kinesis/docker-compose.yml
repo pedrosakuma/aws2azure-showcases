@@ -40,6 +40,19 @@ services:
       # emulator directly if needed for diagnostics; verification actually
       # goes through aws2azure (the point of this case study), not around it.
       - "5672:5672"
+    healthcheck:
+      # The emulator's AMQP listener accepts TCP connections well before it
+      # is actually ready to serve AMQP traffic -- aws2azure's own Kinesis
+      # integration test fixture (KinesisEmulatorProxyFixture.cs) waits for
+      # the port AND then sleeps an extra 15s before treating it as ready.
+      # start_period + interval*retries here reproduce that same warm-up
+      # margin so aws2azure doesn't attempt its first AMQP connection too
+      # early and fail with a transient socket error.
+      test: ["CMD-SHELL", "timeout 2 bash -c '</dev/tcp/127.0.0.1/5672' || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 30s
 
   aws2azure:
     build:
@@ -53,7 +66,8 @@ services:
     volumes:
       - ./config/aws2azure-config.json:/app/config.json:ro
     depends_on:
-      - eventhubs-emulator
+      eventhubs-emulator:
+        condition: service_healthy
     networks:
       default:
         aliases:
