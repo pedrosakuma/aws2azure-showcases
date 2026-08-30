@@ -71,7 +71,12 @@ regional failover.
 
 ```bash
 cd case-studies/fluentbit-kinesis
-docker compose up --build -d
+
+# Starts azurite + eventhubs-emulator + aws2azure, waits for the emulator's
+# AMQP port and aws2azure's health endpoint (with a one-shot restart
+# mitigation for a known emulator readiness flake, see the script), then
+# starts fluent-bit last so its startup burst isn't dropped.
+./scripts/wait_for_stack.sh
 
 # aws2azure routes by Host header (must start with "kinesis."); map a
 # hostname the verification script uses to localhost so the Authorization

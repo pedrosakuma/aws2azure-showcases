@@ -40,23 +40,9 @@ services:
       METADATA_SERVER: azurite
       ACCEPT_EULA: "Y"
     ports:
-      # Exposed to the host so scripts/verify_e2e_run.py could talk to the
-      # emulator directly if needed for diagnostics; verification actually
-      # goes through aws2azure (the point of this case study), not around it.
+      # Exposed to the host so scripts/wait_for_stack.sh and
+      # scripts/verify_e2e_run.py can poll/diagnose it directly.
       - "5672:5672"
-    healthcheck:
-      # The emulator's AMQP listener accepts TCP connections well before it
-      # is actually ready to serve AMQP traffic -- aws2azure's own Kinesis
-      # integration test fixture (KinesisEmulatorProxyFixture.cs) waits for
-      # the port AND then sleeps an extra 15s before treating it as ready.
-      # start_period + interval*retries here reproduce that same warm-up
-      # margin so aws2azure doesn't attempt its first AMQP connection too
-      # early and fail with a transient socket error.
-      test: ["CMD-SHELL", "timeout 2 bash -c '</dev/tcp/127.0.0.1/5672' || exit 1"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
-      start_period: 30s
 
   aws2azure:
     build:
@@ -70,8 +56,7 @@ services:
     volumes:
       - ./config/aws2azure-config.json:/app/config.json:ro
     depends_on:
-      eventhubs-emulator:
-        condition: service_healthy
+      - eventhubs-emulator
     networks:
       default:
         aliases:
@@ -90,6 +75,11 @@ services:
       AWS_SECRET_ACCESS_KEY: "showcase-local-dev-secret-not-real"
     volumes:
       - ./fluent-bit/fluent-bit.conf:/fluent-bit/etc/fluent-bit.conf:ro
+    # Started separately (docker compose up -d fluent-bit) by
+    # scripts/wait_for_stack.sh only once the Event Hubs emulator's AMQP
+    # listener is actually accepting connections -- see that script for why
+    # a plain depends_on isn't enough here (the emulator's own internal
+    # MetadataStore readiness probe has a known upstream flake: Azure/
+    # azure-event-hubs-emulator-installer#70).
     depends_on:
-      aws2azure:
-        condition: service_healthy
+      - aws2azure

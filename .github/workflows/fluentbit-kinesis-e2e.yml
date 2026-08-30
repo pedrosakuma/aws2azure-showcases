@@ -57,7 +57,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Start the full stack
-        run: docker compose up --build -d
+        run: ./scripts/wait_for_stack.sh
 
       - name: Map the Kinesis routing hostname to localhost
         run: echo "127.0.0.1 kinesis.aws2azure.fluentbit-showcase.local" | sudo tee -a /etc/hosts
