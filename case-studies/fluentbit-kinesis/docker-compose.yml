@@ -91,6 +91,7 @@ services:
       AWS_SECRET_ACCESS_KEY: "showcase-local-dev-secret-not-real"
     volumes:
       - ./fluent-bit/fluent-bit.conf:/fluent-bit/etc/fluent-bit.conf:ro
+      - ./deploy/tls-proxy/cert.pem:/fluent-bit/etc/kinesis-tls-ca.pem:ro
     # Started separately (docker compose up -d fluent-bit) by
     # scripts/wait_for_stack.sh only once the Event Hubs emulator's AMQP
     # listener is actually accepting connections -- see that script for why

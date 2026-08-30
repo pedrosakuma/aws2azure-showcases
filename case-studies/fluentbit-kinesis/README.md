@@ -87,8 +87,13 @@ private network), this case study runs a small self-signed-cert nginx
 sidecar (`deploy/tls-proxy/`) purely to satisfy this plugin's hardcoded TLS
 requirement; a real deployment fronting aws2azure with real TLS
 termination (a service mesh sidecar, an ALB/Envoy, etc.) would not need
-anything special here. `tls.verify off` (a generic Fluent Bit output
-property, not `kinesis_streams`-specific) accepts the self-signed cert.
+anything special here. The plugin also hardcodes cert verification on for
+that same connection (`flb_tls_create(..., verify=TRUE, ...)`, ignoring the
+generic `tls.verify` output property entirely), so a self-signed cert can't
+be accepted by turning verification off -- `tls.ca_file` (which the plugin
+does forward) points Fluent Bit at the sidecar's own checked-in dev cert
+instead, a fixed throwaway pair scoped to this ephemeral stack, the same
+convention as the other case studies' well-known emulator dev keys.
 
 ## Running it locally
 
