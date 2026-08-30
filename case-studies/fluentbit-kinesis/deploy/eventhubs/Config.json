@@ -3,7 +3,7 @@
     "NamespaceConfig": [
       {
         "Type": "EventHub",
-        "Name": "showcaseNs1",
+        "Name": "emulatorNs1",
         "Entities": [
           {
             "Name": "fluentbit-logs",

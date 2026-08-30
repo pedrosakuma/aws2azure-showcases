@@ -56,7 +56,7 @@ regional failover.
   integration tests use) + **Azurite**, providing the emulator's blob/metadata
   backend. The Event Hubs emulator does not support dynamic entity creation
   (unlike the Service Bus emulator the SQS/SNS case studies use), so the
-  namespace (`showcaseNs1`) and event hub (`fluentbit-logs`, 1 partition) are
+  namespace (`emulatorNs1`, a fixed name the emulator requires) and event hub (`fluentbit-logs`, 1 partition) are
   declared statically in `deploy/eventhubs/Config.json` and mirrored in
   `config/aws2azure-config.json`'s `streams` map.
 - **aws2azure**, built directly from the `main` branch of the upstream repo
