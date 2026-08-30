@@ -43,8 +43,8 @@ wait_for_http_ok() {
   return 0
 }
 
-echo "==> Starting azurite, eventhubs-emulator, aws2azure"
-docker compose up --build -d azurite eventhubs-emulator aws2azure
+echo "==> Starting azurite, eventhubs-emulator, aws2azure, kinesis-tls"
+docker compose up --build -d azurite eventhubs-emulator aws2azure kinesis-tls
 
 echo "==> Waiting for the Event Hubs emulator's AMQP port (up to 75s)"
 if ! wait_for_tcp 127.0.0.1 5672 75; then

@@ -7,7 +7,7 @@
 SDK implementation from the Python/JVM clients this repo's other case
 studies use) batches log records into a Kinesis Data Stream via the
 `PutRecords` API. It is configured entirely through its standard `endpoint`
-/ `port` / `tls` options pointed at aws2azure, and standard AWS credential
+/ `port` options pointed at aws2azure, and standard AWS credential
 environment variables -- zero code changes, config only, the same pattern
 proven by every other case study in this repo.
 
@@ -63,9 +63,32 @@ regional failover.
   via a remote git build context (no published image yet), configured with
   a single Kinesis binding (`kind: eventHubs`) routed via the
   `kinesis.aws2azure` network alias.
-- **Fluent Bit** (`fluent/fluent-bit`), configured with its real `dummy`
-  input (5 deterministic synthetic records) and real `kinesis_streams`
-  output pointed at aws2azure.
+- **kinesis-tls**: a small self-signed-cert nginx sidecar terminating TLS
+  for Fluent Bit's write path only (see "A real Fluent Bit constraint"
+  below) and forwarding to aws2azure in plaintext with the Host header
+  intact.
+- **Fluent Bit** (`fluent/fluent-bit`, 3.2.2+ -- see below for why), configured
+  with its real `dummy` input (5 deterministic synthetic records) and real
+  `kinesis_streams` output pointed at the `kinesis-tls` sidecar.
+
+## A real Fluent Bit constraint this surfaced
+
+Every released version of Fluent Bit's `kinesis_streams` output plugin
+(checked through 3.2.x, source: `plugins/out_kinesis_streams/kinesis.c`)
+unconditionally wraps its upstream connection in TLS -- it passes
+`FLB_IO_TLS` to `flb_upstream_create()` with no config option to disable
+it. Versions before 3.2.0 additionally hardcode port 443 regardless of any
+`Port` setting (`a90daaf0` added custom-port support on 2024-08-30, first
+in the 3.2.0 release); this case study therefore requires Fluent Bit
+**3.2.2**, not the 3.1.9 pinned by the other case studies' baseline choices.
+Because aws2azure only serves plain HTTP (by design -- TLS termination is
+expected to happen at the infrastructure layer or not be needed on a
+private network), this case study runs a small self-signed-cert nginx
+sidecar (`deploy/tls-proxy/`) purely to satisfy this plugin's hardcoded TLS
+requirement; a real deployment fronting aws2azure with real TLS
+termination (a service mesh sidecar, an ALB/Envoy, etc.) would not need
+anything special here. `tls.verify off` (a generic Fluent Bit output
+property, not `kinesis_streams`-specific) accepts the self-signed cert.
 
 ## Running it locally
 

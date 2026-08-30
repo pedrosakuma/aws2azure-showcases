@@ -68,8 +68,24 @@ services:
       retries: 5
       start_period: 5s
 
+  # Fluent Bit's official `kinesis_streams` output plugin unconditionally
+  # speaks TLS to its upstream (hardcoded, no config toggle, through at
+  # least Fluent Bit 3.2.x) -- aws2azure itself only serves plain HTTP, so
+  # this self-signed-cert nginx sidecar bridges the two for the write path
+  # only. The read path (verify_e2e_run.py, plain boto3) talks to aws2azure
+  # directly over plain HTTP and doesn't need it.
+  kinesis-tls:
+    build:
+      context: ./deploy/tls-proxy
+    depends_on:
+      - aws2azure
+    networks:
+      default:
+        aliases:
+          - kinesis.tls.aws2azure
+
   fluent-bit:
-    image: fluent/fluent-bit:3.1.9
+    image: fluent/fluent-bit:3.2.2
     environment:
       AWS_ACCESS_KEY_ID: "AKIA-FLUENTBIT-KINESIS-SHOWCASE"
       AWS_SECRET_ACCESS_KEY: "showcase-local-dev-secret-not-real"
@@ -82,4 +98,4 @@ services:
     # MetadataStore readiness probe has a known upstream flake: Azure/
     # azure-event-hubs-emulator-installer#70).
     depends_on:
-      - aws2azure
+      - kinesis-tls
