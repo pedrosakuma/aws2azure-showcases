@@ -1,0 +1,77 @@
+# Azure Event Hubs emulator (+ Azurite for its blob/metadata backend) +
+# aws2azure + Fluent Bit, shipping synthetic log records into a Kinesis
+# Data Stream via Fluent Bit's real, unmodified `kinesis_streams` output
+# plugin -- proving a non-Python/non-JVM AWS SDK client stack works against
+# aws2azure with zero code changes, just plugin configuration.
+#
+# aws2azure routes Kinesis requests by Host header (must start with
+# "kinesis.") -- the same convention a real deployment satisfies via
+# DNS/hosts pointing kinesis.<region>.amazonaws.com at the sidecar.
+# Kinesis is backed here by Azure Event Hubs via the local Event Hubs
+# emulator -- the same emulator image (mcr.microsoft.com/azure-messaging/
+# eventhubs-emulator) aws2azure's own Kinesis integration tests use
+# (tests/Aws2Azure.IntegrationTests/Fixtures/KinesisEmulatorProxyFixture.cs
+# in the aws2azure repo), so this case study is fully local and cost-free.
+#
+# The Event Hubs emulator does not support dynamic entity creation (unlike
+# the Service Bus emulator used by the SQS/SNS case studies): the namespace
+# and event hub are declared statically in deploy/eventhubs/Config.json and
+# mirrored in config/aws2azure-config.json's "streams" map.
+#
+# aws2azure is built directly from the upstream repo (no published image
+# yet) via a remote git build context.
+
+services:
+  azurite:
+    image: mcr.microsoft.com/azure-storage/azurite:latest
+    command: azurite-blob --blobHost 0.0.0.0 --skipApiVersionCheck
+
+  eventhubs-emulator:
+    build:
+      context: ./deploy/eventhubs
+    depends_on:
+      - azurite
+    environment:
+      BLOB_SERVER: azurite
+      METADATA_SERVER: azurite
+      ACCEPT_EULA: "Y"
+    ports:
+      # Exposed to the host so scripts/verify_e2e_run.py could talk to the
+      # emulator directly if needed for diagnostics; verification actually
+      # goes through aws2azure (the point of this case study), not around it.
+      - "5672:5672"
+
+  aws2azure:
+    build:
+      context: https://github.com/pedrosakuma/aws2azure.git
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      AWS2AZURE_CONFIG_FILE: /app/config.json
+      ASPNETCORE_URLS: http://+:8080
+    volumes:
+      - ./config/aws2azure-config.json:/app/config.json:ro
+    depends_on:
+      - eventhubs-emulator
+    networks:
+      default:
+        aliases:
+          - kinesis.aws2azure
+    healthcheck:
+      test: ["CMD", "/app/Aws2Azure.Proxy", "--health-check"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
+  fluent-bit:
+    image: fluent/fluent-bit:3.1.9
+    environment:
+      AWS_ACCESS_KEY_ID: "AKIA-FLUENTBIT-KINESIS-SHOWCASE"
+      AWS_SECRET_ACCESS_KEY: "showcase-local-dev-secret-not-real"
+    volumes:
+      - ./fluent-bit/fluent-bit.conf:/fluent-bit/etc/fluent-bit.conf:ro
+    depends_on:
+      aws2azure:
+        condition: service_healthy

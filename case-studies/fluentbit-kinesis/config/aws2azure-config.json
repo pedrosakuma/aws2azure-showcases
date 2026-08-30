@@ -1,0 +1,35 @@
+{
+  "services": {
+    "kinesis": { "enabled": true }
+  },
+  "bindings": [
+    {
+      "aws": {
+        "accessKeyId": "AKIA-FLUENTBIT-KINESIS-SHOWCASE",
+        "secretAccessKey": "showcase-local-dev-secret-not-real"
+      },
+      "azure": {
+        "kinesis": {
+          "kind": "eventHubs",
+          "target": {
+            "namespace": "showcaseNs1",
+            "endpoint": "http://eventhubs-emulator:5672/"
+          },
+          "auth": {
+            "mode": "sas",
+            "keyName": "RootManageSharedAccessKey",
+            "key": "SAS_KEY_VALUE"
+          },
+          "shardIteratorSigningKey": "4VKdQnDTwe+tJ6InQYz/CO8m2huoHwM7qqXgvHVo0ig=",
+          "streams": {
+            "fluentbit-showcase-stream": {
+              "eventHubName": "fluentbit-logs",
+              "consumerGroup": "$Default",
+              "partitionCount": 1
+            }
+          }
+        }
+      }
+    }
+  ]
+}
