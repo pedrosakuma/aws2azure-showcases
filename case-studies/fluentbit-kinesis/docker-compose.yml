@@ -1,0 +1,102 @@
+# Azure Event Hubs emulator (+ Azurite for its blob/metadata backend) +
+# aws2azure + Fluent Bit, shipping synthetic log records into a Kinesis
+# Data Stream via Fluent Bit's real, unmodified `kinesis_streams` output
+# plugin -- proving a non-Python/non-JVM AWS SDK client stack works against
+# aws2azure with zero code changes, just plugin configuration.
+#
+# aws2azure routes Kinesis requests by Host header (must start with
+# "kinesis.") -- the same convention a real deployment satisfies via
+# DNS/hosts pointing kinesis.<region>.amazonaws.com at the sidecar.
+# Kinesis is backed here by Azure Event Hubs via the local Event Hubs
+# emulator -- the same emulator image (mcr.microsoft.com/azure-messaging/
+# eventhubs-emulator) aws2azure's own Kinesis integration tests use
+# (tests/Aws2Azure.IntegrationTests/Fixtures/KinesisEmulatorProxyFixture.cs
+# in the aws2azure repo), so this case study is fully local and cost-free.
+#
+# The Event Hubs emulator does not support dynamic entity creation (unlike
+# the Service Bus emulator used by the SQS/SNS case studies): the namespace
+# and event hub are declared statically in deploy/eventhubs/Config.json and
+# mirrored in config/aws2azure-config.json's "streams" map.
+#
+# aws2azure is built directly from the upstream repo (no published image
+# yet) via a remote git build context.
+
+services:
+  azurite:
+    image: mcr.microsoft.com/azure-storage/azurite:latest
+    # Default entrypoint (all three services: blob/queue/table) -- the
+    # Event Hubs emulator's MetadataStore health check needs Table storage,
+    # not just Blob; aws2azure's own Kinesis integration test fixture
+    # (KinesisEmulatorProxyFixture.cs) likewise runs the image unmodified.
+    command: azurite --blobHost 0.0.0.0 --queueHost 0.0.0.0 --tableHost 0.0.0.0 --skipApiVersionCheck
+
+  eventhubs-emulator:
+    build:
+      context: ./deploy/eventhubs
+    depends_on:
+      - azurite
+    environment:
+      BLOB_SERVER: azurite
+      METADATA_SERVER: azurite
+      ACCEPT_EULA: "Y"
+    ports:
+      # Exposed to the host so scripts/wait_for_stack.sh and
+      # scripts/verify_e2e_run.py can poll/diagnose it directly.
+      - "5672:5672"
+
+  aws2azure:
+    build:
+      context: https://github.com/pedrosakuma/aws2azure.git
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      AWS2AZURE_CONFIG_FILE: /app/config.json
+      ASPNETCORE_URLS: http://+:8080
+    volumes:
+      - ./config/aws2azure-config.json:/app/config.json:ro
+    depends_on:
+      - eventhubs-emulator
+    networks:
+      default:
+        aliases:
+          - kinesis.aws2azure
+    healthcheck:
+      test: ["CMD", "/app/Aws2Azure.Proxy", "--health-check"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
+  # Fluent Bit's official `kinesis_streams` output plugin unconditionally
+  # speaks TLS to its upstream (hardcoded, no config toggle, through at
+  # least Fluent Bit 3.2.x) -- aws2azure itself only serves plain HTTP, so
+  # this self-signed-cert nginx sidecar bridges the two for the write path
+  # only. The read path (verify_e2e_run.py, plain boto3) talks to aws2azure
+  # directly over plain HTTP and doesn't need it.
+  kinesis-tls:
+    build:
+      context: ./deploy/tls-proxy
+    depends_on:
+      - aws2azure
+    networks:
+      default:
+        aliases:
+          - kinesis.tls.aws2azure
+
+  fluent-bit:
+    image: fluent/fluent-bit:3.2.2
+    environment:
+      AWS_ACCESS_KEY_ID: "AKIA-FLUENTBIT-KINESIS-SHOWCASE"
+      AWS_SECRET_ACCESS_KEY: "showcase-local-dev-secret-not-real"
+    volumes:
+      - ./fluent-bit/fluent-bit.conf:/fluent-bit/etc/fluent-bit.conf:ro
+      - ./deploy/tls-proxy/cert.pem:/fluent-bit/etc/kinesis-tls-ca.pem:ro
+    # Started separately (docker compose up -d fluent-bit) by
+    # scripts/wait_for_stack.sh only once the Event Hubs emulator's AMQP
+    # listener is actually accepting connections -- see that script for why
+    # a plain depends_on isn't enough here (the emulator's own internal
+    # MetadataStore readiness probe has a known upstream flake: Azure/
+    # azure-event-hubs-emulator-installer#70).
+    depends_on:
+      - kinesis-tls
