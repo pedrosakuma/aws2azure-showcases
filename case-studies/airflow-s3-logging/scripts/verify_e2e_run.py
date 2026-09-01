@@ -65,8 +65,48 @@ def api(method, path, **kwargs):
     return r.json() if r.content else {}
 
 
+def clear_catchup_dag_runs():
+    """Delete any dag runs that already exist for DAG_ID before we trigger
+    our own.
+
+    `example_bash_operator` is Airflow's bundled example DAG (loaded via
+    AIRFLOW__CORE__LOAD_EXAMPLES) and is not authored by this case study, so
+    its `catchup` setting is out of our control. Unpausing it against a
+    fresh metadata database makes the scheduler immediately backfill the
+    most recently missed schedule interval as its own concurrent
+    `scheduled__...` dag run, executing the same task IDs on the shared
+    LocalExecutor and issuing its own concurrent PutObject calls against
+    aws2azure/Azurite alongside the manually triggered run this script
+    actually verifies. That contention has been observed to occasionally
+    push the remote-log-upload race past wait_for_azurite_log_containment's
+    retry budget (a real, reproducible flake -- not a one-off). Removing any
+    pre-existing runs right after unpausing, before triggering our own,
+    removes that noise at the source instead of only widening the retry
+    window.
+    """
+    resp = api("GET", f"/dags/{DAG_ID}/dagRuns")
+    for dag_run in resp.get("dag_runs", []):
+        stray_run_id = dag_run["dag_run_id"]
+        try:
+            requests.delete(
+                f"{WEBSERVER}/api/v1/dags/{DAG_ID}/dagRuns/{stray_run_id}",
+                auth=AUTH,
+                timeout=15,
+            ).raise_for_status()
+            print(
+                f"deleted pre-existing dag run {stray_run_id} "
+                f"(state={dag_run['state']}) to avoid catchup-run contention"
+            )
+        except requests.RequestException as exc:
+            # Best-effort: a run that's already mid-execution may reject
+            # deletion. Leaving it in place only risks reintroducing the
+            # contention this is meant to prevent, not correctness.
+            print(f"could not delete stray dag run {stray_run_id}: {exc}")
+
+
 def trigger_dag_run():
     api("PATCH", f"/dags/{DAG_ID}", json={"is_paused": False})
+    clear_catchup_dag_runs()
     resp = api("POST", f"/dags/{DAG_ID}/dagRuns", json={})
     run_id = resp["dag_run_id"]
     print(f"triggered dag run {run_id}")
@@ -124,7 +164,7 @@ def delete_local_log_copy(run_id, try_number=1):
     print(f"deleted local log copy: {path}")
 
 
-def wait_for_azurite_log_containment(run_id, api_log_fn, failure_hint, timeout=60, interval=5):
+def wait_for_azurite_log_containment(run_id, api_log_fn, failure_hint, timeout=180, interval=5):
     """Poll until the object stored in Azurite is contained in the log
     served by the REST API, or raise the given assertion after timeout.
 
@@ -134,7 +174,9 @@ def wait_for_azurite_log_containment(run_id, api_log_fn, failure_hint, timeout=6
     "success". Reading immediately after that state transition can
     legitimately race the upload; retrying tolerates that eventual
     consistency instead of treating a transient timing gap as a wiring
-    bug.
+    bug. The 180s budget (widened from an initial 60s that still flaked
+    under shared-runner contention) is a defensive margin on top of
+    clear_catchup_dag_runs(), which removes the actual contention source.
     """
     deadline = time.time() + timeout
     last_api_log = ""
@@ -145,6 +187,8 @@ def wait_for_azurite_log_containment(run_id, api_log_fn, failure_hint, timeout=6
         if last_azurite_log in last_api_log:
             return last_api_log
         if time.time() >= deadline:
+            print(f"azurite object ({len(last_azurite_log)} bytes):\n{last_azurite_log}")
+            print(f"api-served log ({len(last_api_log)} bytes):\n{last_api_log}")
             assert last_azurite_log in last_api_log, failure_hint
         time.sleep(interval)
 
